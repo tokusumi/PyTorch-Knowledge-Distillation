@@ -1,0 +1,22 @@
+version: '3'
+
+services:
+  test:
+    build:
+      context: docker
+      dockerfile: DockerfileDev
+    command: /bin/bash
+    volumes:
+      - ./:/home/kd/
+    environment:
+      - MMCONFIG=/workspace/mmclassification/configs
+    working_dir: /home/kd
+    tty: true
+    shm_size: 9GB
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
