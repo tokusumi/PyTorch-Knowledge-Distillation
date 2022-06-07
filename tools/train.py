@@ -16,17 +16,17 @@ def main():
     ...
 ```
 """
-import argparse
 import copy
 import os
 import os.path as osp
+from pathlib import Path
 import time
-import warnings
+from typing import Optional
 
 import mmcv
 import torch
 import torch.distributed as dist
-from mmcv import Config, DictAction
+from mmcv import Config
 from mmcv.runner import get_dist_info, init_dist
 
 from mmcls import __version__
@@ -34,86 +34,51 @@ from mmcls.apis import init_random_seed, set_random_seed, train_model
 from mmcls.datasets import build_dataset
 from mmcls.models import build_classifier
 from mmcls.utils import collect_env, get_root_logger, setup_multi_processes
+import typer
 
 from kds import build_kd_classifier
+from arguments import (
+    Launcher,
+    Device,
+    t_config,
+    t_gpu_id,
+    t_launcher,
+    t_local_rank,
+    t_device,
+)
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train a model")
-    parser.add_argument("config", help="train config file path")
-    parser.add_argument("--work-dir", help="the dir to save logs and models")
-    parser.add_argument("--resume-from", help="the checkpoint file to resume from")
-    parser.add_argument(
-        "--no-validate",
-        action="store_true",
-        help="whether not to evaluate the checkpoint during training",
-    )
-    group_gpus = parser.add_mutually_exclusive_group()
-    group_gpus.add_argument("--device", help="device used for training. (Deprecated)")
-    group_gpus.add_argument(
-        "--gpus",
-        type=int,
-        help="(Deprecated, please use --gpu-id) number of gpus to use "
-        "(only applicable to non-distributed training)",
-    )
-    group_gpus.add_argument(
-        "--gpu-ids",
-        type=int,
-        nargs="+",
-        help="(Deprecated, please use --gpu-id) ids of gpus to use "
-        "(only applicable to non-distributed training)",
-    )
-    group_gpus.add_argument(
-        "--gpu-id",
-        type=int,
-        default=0,
-        help="id of gpu to use " "(only applicable to non-distributed training)",
-    )
-    parser.add_argument(
-        "--ipu-replicas", type=int, default=None, help="num of ipu replicas to use"
-    )
-    parser.add_argument("--seed", type=int, default=None, help="random seed")
-    parser.add_argument(
-        "--diff-seed",
-        action="store_true",
+def main(
+    config: Path = t_config,
+    work_dir: Path = typer.Argument(..., help="the dir to save logs and models"),
+    resume_from: Optional[Path] = typer.Option(
+        None, help="the checkpoint file to resume from"
+    ),
+    no_validate: bool = typer.Option(
+        False, help="whether not to evaluate the checkpoint during training"
+    ),
+    device: Device = t_device,
+    gpu_id: int = t_gpu_id,
+    ipu_replicas: Optional[int] = typer.Option(None, help="num of ipu replicas to use"),
+    seed: int = typer.Option(None, help="random seed"),
+    diff_seed: bool = typer.Option(
+        False,
         help="Whether or not set different seeds for different ranks",
-    )
-    parser.add_argument(
-        "--deterministic",
-        action="store_true",
+    ),
+    deterministic: bool = typer.Option(
+        False,
         help="whether to set deterministic options for CUDNN backend.",
-    )
-    parser.add_argument(
-        "--cfg-options",
-        nargs="+",
-        action=DictAction,
-        help="override some settings in the used config, the key-value pair "
-        "in xxx=yyy format will be merged into config file. If the value to "
-        'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
-        'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
-        "Note that the quotation marks are necessary and that no white space "
-        "is allowed.",
-    )
-    parser.add_argument(
-        "--launcher",
-        choices=["none", "pytorch", "slurm", "mpi"],
-        default="none",
-        help="job launcher",
-    )
-    parser.add_argument("--local_rank", type=int, default=0)
-    args = parser.parse_args()
+    ),
+    launcher: Launcher = t_launcher,
+    local_rank: str = t_local_rank,
+):
+    """Train a model"""
     if "LOCAL_RANK" not in os.environ:
-        os.environ["LOCAL_RANK"] = str(args.local_rank)
+        os.environ["LOCAL_RANK"] = local_rank
 
-    return args
-
-
-def main():
-    args = parse_args()
-
-    cfg = Config.fromfile(args.config)
-    if args.cfg_options is not None:
-        cfg.merge_from_dict(args.cfg_options)
+    cfg = Config.fromfile(config)
+    # if args.cfg_options is not None:
+    #     cfg.merge_from_dict(args.cfg_options)
 
     # set multi-process settings
     setup_multi_processes(cfg)
@@ -123,51 +88,35 @@ def main():
         torch.backends.cudnn.benchmark = True
 
     # work_dir is determined in this priority: CLI > segment in file > filename
-    if args.work_dir is not None:
-        # update configs according to CLI args if args.work_dir is not None
-        cfg.work_dir = args.work_dir
+    if work_dir is not None:
+        # update configs according to CLI args if work_dir is not None
+        cfg.work_dir = str(work_dir)
     elif cfg.get("work_dir", None) is None:
         # use config filename as default work_dir if cfg.work_dir is None
         cfg.work_dir = osp.join(
-            "./work_dirs", osp.splitext(osp.basename(args.config))[0]
+            "./work_dirs", osp.splitext(config.absolute().parent.name)[0]
         )
-    if args.resume_from is not None:
-        cfg.resume_from = args.resume_from
-    if args.gpus is not None:
-        cfg.gpu_ids = range(1)
-        warnings.warn(
-            "`--gpus` is deprecated because we only support "
-            "single GPU mode in non-distributed training. "
-            "Use `gpus=1` now."
-        )
-    if args.gpu_ids is not None:
-        cfg.gpu_ids = args.gpu_ids[0:1]
-        warnings.warn(
-            "`--gpu-ids` is deprecated, please use `--gpu-id`. "
-            "Because we only support single GPU mode in "
-            "non-distributed training. Use the first GPU "
-            "in `gpu_ids` now."
-        )
-    if args.gpus is None and args.gpu_ids is None:
-        cfg.gpu_ids = [args.gpu_id]
+    if resume_from is not None:
+        cfg.resume_from = str(resume_from)
+    cfg.gpu_ids = [gpu_id]
 
-    if args.ipu_replicas is not None:
-        cfg.ipu_replicas = args.ipu_replicas
-        args.device = "ipu"
+    if ipu_replicas is not None:
+        cfg.ipu_replicas = ipu_replicas
+        device = Device.ipu
 
     # init distributed env first, since logger depends on the dist info.
-    if args.launcher == "none":
+    if launcher == Launcher.none:
         distributed = False
     else:
         distributed = True
-        init_dist(args.launcher, **cfg.dist_params)
+        init_dist(launcher.value, **cfg.dist_params)
         _, world_size = get_dist_info()
         cfg.gpu_ids = range(world_size)
 
     # create work_dir
     mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
     # dump config
-    cfg.dump(osp.join(cfg.work_dir, osp.basename(args.config)))
+    cfg.dump(osp.join(cfg.work_dir, config.absolute().parent.name))
     # init the logger before other steps
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     log_file = osp.join(cfg.work_dir, f"{timestamp}.log")
@@ -188,10 +137,10 @@ def main():
     logger.info(f"Config:\n{cfg.pretty_text}")
 
     # set random seeds
-    seed = init_random_seed(args.seed)
-    seed = seed + dist.get_rank() if args.diff_seed else seed
-    logger.info(f"Set random seed to {seed}, " f"deterministic: {args.deterministic}")
-    set_random_seed(seed, deterministic=args.deterministic)
+    seed = init_random_seed(seed)
+    seed = seed + dist.get_rank() if diff_seed else seed
+    logger.info(f"Set random seed to {seed}, " f"deterministic: {deterministic}")
+    set_random_seed(seed, deterministic=deterministic)
     cfg.seed = seed
     meta["seed"] = seed
 
@@ -225,12 +174,12 @@ def main():
         datasets,
         cfg,
         distributed=distributed,
-        validate=(not args.no_validate),
+        validate=(not no_validate),
         timestamp=timestamp,
-        device=args.device,
+        device=device.value,
         meta=meta,
     )
 
 
 if __name__ == "__main__":
-    main()
+    typer.run(main)

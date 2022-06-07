@@ -6,9 +6,9 @@ FROM pytorch/pytorch:${PYTORCH}-cuda${CUDA}-cudnn${CUDNN}-devel
 
 # Fix GPG key problem
 RUN distro=$(. /usr/lib/os-release; echo $ID$VERSION_ID | tr -d ".") \
- && arch=$(/usr/bin/arch) \
- && apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/3bf863cc.pub \
- && apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/machine-learning/repos/$distro/$arch/7fa2af80.pub
+    && arch=$(/usr/bin/arch) \
+    && apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/3bf863cc.pub \
+    && apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/machine-learning/repos/$distro/$arch/7fa2af80.pub
 
 # Install Torch dependencies
 ENV TORCH_CUDA_ARCH_LIST="8.6"
@@ -28,3 +28,6 @@ RUN conda clean --all
 RUN git clone https://github.com/open-mmlab/mmclassification.git
 WORKDIR ./mmclassification
 RUN pip install --no-cache-dir -e .
+
+# Install utilities
+RUN pip installl typer
