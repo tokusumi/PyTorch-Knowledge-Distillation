@@ -29,6 +29,8 @@ to be deep? In: NeurIPS)[<https://papers.nips.cc/paper/2014/hash/ea8fcd92d595817
 In container:
 
 ```bash
+$ cd /home/kd
+$ export PYTHONPATH="`pwd`:$PYTHONPATH"
 # Learn large teacher model
 $ python tools/train.py experiments/baseline/resnet50.py
 # wait a few hours...
@@ -36,9 +38,13 @@ $ python tools/train.py experiments/baseline/resnet50.py
 $ python tools/train.py experiments/baseline/resnet18.py
 # wait a few hours...
 # Then, Learn small student model with mimic teacher model prediction
-$ python tools/train.py experiments/response_based/logits_resnet18.py
+$ OUTPUT="work_dir/response_based_logts_resnet18"
+$ python tools/train.py experiments/response_based/logits_resnet18.py --work-dir $OUTPUT
 # check teacher could helps student or not
+$ python tools/test.py $OUTPUT/logits_resnet18.py $OUTPUT/latest.pth --out $OUTPUT/test_result.json
 ```
+
+See more details with `--help` arguments for `train.py`/`test.py`.
 
 ## Benchmarks
 
