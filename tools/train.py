@@ -50,7 +50,9 @@ from arguments import (
 
 def main(
     config: Path = t_config,
-    work_dir: Path = typer.Argument(..., help="the dir to save logs and models"),
+    work_dir: Optional[Path] = typer.Argument(
+        None, help="the dir to save logs and models"
+    ),
     resume_from: Optional[Path] = typer.Option(
         None, help="the checkpoint file to resume from"
     ),
@@ -116,7 +118,7 @@ def main(
     # create work_dir
     mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
     # dump config
-    cfg.dump(osp.join(cfg.work_dir, config.absolute().parent.name))
+    cfg.dump(osp.join(cfg.work_dir, config.absolute().name))
     # init the logger before other steps
     timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
     log_file = osp.join(cfg.work_dir, f"{timestamp}.log")
