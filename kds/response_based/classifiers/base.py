@@ -75,7 +75,7 @@ class ResponseBased(BaseClassifierKD):
             pred_student, softmax=False, post_process=False
         )
         losses = self.student.head.loss(pred_student, gt_label)
-        cls_loss = losses["loss"]
+        cls_loss = losses.pop("loss")
         losses["cls_loss"] = cls_loss
 
         # calculate kd losses
@@ -83,6 +83,6 @@ class ResponseBased(BaseClassifierKD):
         kd_loss = self.loss(pred_student, pred_teacher)
         losses["kd_loss"] = kd_loss
 
-        # add both loss
-        losses["loss"] = kd_loss + cls_loss
+        # will be added both loss in _parse_losses
+        # losses["loss"] = kd_loss + cls_loss
         return losses
