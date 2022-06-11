@@ -100,6 +100,12 @@ def main(
         )
     if resume_from is not None:
         cfg.resume_from = str(resume_from)
+    else:
+        if osp.exists(cfg.work_dir):
+            raise FileExistsError(
+                f"Already used: {cfg.work_dir}\n"
+                "Delete them, create new one or set resume-from arguments there",
+            )
     cfg.gpu_ids = [gpu_id]
 
     if ipu_replicas is not None:
