@@ -17,12 +17,14 @@ class BaseClassifierKD(BaseClassifier):
         student: Union[ImageClassifier, ConfigDict],
         teacher: Union[ImageClassifier, ConfigDict],
         loss: Union[nn.Module, ConfigDict],
+        alpha: float = 0.5,
     ):
         """
         Args:
             student: same as "model" in config
             teacher: Config format are {config: <model config file path>, ckpt: <checkpoint for teacher model>}
             loss: Config format are {type: <select KD loss>, ...} as same as model loss config
+            alpha: weight of class loss and KD loss
         """
         super(BaseClassifier, self).__init__(None)
         # build classifier
@@ -41,6 +43,7 @@ class BaseClassifierKD(BaseClassifier):
         if isinstance(loss, ConfigDict):
             loss = LOSSES.build(loss)
         self.loss = loss
+        self.alpha = alpha
 
         self.augments = None
         if self.student.augments is not None:
@@ -76,12 +79,12 @@ class ResponseBased(BaseClassifierKD):
         )
         losses = self.student.head.loss(pred_student, gt_label)
         cls_loss = losses.pop("loss")
-        losses["cls_loss"] = cls_loss
+        losses["cls_loss"] = cls_loss * (1 - self.alpha)
 
         # calculate kd losses
         pred_teacher = self.teacher.simple_test(img, softmax=False, post_process=False)
         kd_loss = self.loss(pred_student, pred_teacher)
-        losses["kd_loss"] = kd_loss
+        losses["kd_loss"] = kd_loss * self.alpha
 
         # will be added both loss in _parse_losses
         # losses["loss"] = kd_loss + cls_loss
