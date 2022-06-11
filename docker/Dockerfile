@@ -30,4 +30,4 @@ WORKDIR ./mmclassification
 RUN pip install --no-cache-dir -e .
 
 # Install utilities
-RUN pip installl typer
+RUN pip installl typer optuna
