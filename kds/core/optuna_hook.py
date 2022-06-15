@@ -1,4 +1,6 @@
-from mmcv.runner import HOOKS, Hook
+from mmcv.runner import HOOKS, Hook, BaseRunner
+from mmcv.runner.dist_utils import master_only
+from mmcv.runner.hooks.evaluation import DistEvalHook, EvalHook
 
 import optuna
 from optuna.trial import Trial
@@ -6,17 +8,38 @@ from optuna.trial import Trial
 
 @HOOKS.register_module()
 class OptunaTrialHook(Hook):
-    def __init__(self, trial):
+    def __init__(self, trial, optimized="accuracy_top-1", *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.trial = trial
+        self.optimized = optimized
 
-    def after_epoch(self, runner):
-        import pdb
+    @master_only
+    def before_run(self, runner: BaseRunner):
+        super(OptunaTrialHook, self).before_run(runner)
 
-        pdb.set_trace()
+        # Inspect CheckpointHook and EvalHook
+        for hook in runner.hooks:
+            if isinstance(hook, (EvalHook, DistEvalHook)):
+                self.eval_hook = hook
+
+    def after_train_epoch(self, runner: BaseRunner):
         epoch = runner.epoch
-        acc = 0
+        acc = None
+        if self.optimized == "loss":
+            acc = runner.outputs.get("loss", 0)
+        else:
+            eval_res = self.eval_hook.dataloader.dataset.evaluate(
+                self.eval_hook.latest_results, **self.eval_hook.eval_kwargs
+            )
+            for key, value in eval_res.items():
+                if key == self.optimized:
+                    acc = value
+                    break
+        if acc is None:
+            return
 
         self.trial.report(acc, epoch)
+        self.trial.set_user_attr("last", float(acc))
         if self.trial.should_prune():
             raise optuna.exceptions.TrialPruned()
 

@@ -17,6 +17,7 @@ def main():
 ```
 """
 import copy
+from inspect import isclass
 import os
 import os.path as osp
 from pathlib import Path
@@ -26,15 +27,17 @@ from typing import Optional
 import mmcv
 import torch
 import torch.distributed as dist
-from mmcv import Config, ConfigDict
+from mmcv import Config
 from mmcv.runner import get_dist_info, init_dist
+from mmcv.utils import get_logger
 
 from mmcls import __version__
 from mmcls.apis import init_random_seed, set_random_seed, train_model
 from mmcls.datasets import build_dataset
 from mmcls.models import build_classifier
-from mmcls.utils import collect_env, get_root_logger, setup_multi_processes
+from mmcls.utils import collect_env, setup_multi_processes, get_root_logger
 import typer
+import optuna
 
 from kds import build_kd_classifier
 from kds.core.optuna_hook import BaseSuggest
@@ -51,10 +54,10 @@ from arguments import (
 
 def update_config_with_optuna(trial, cfg: Config, optuna_config: Config):
     # override ConfDict with user-defined optuna config as:
-    # cfg.distil.alpha = trial.suggest_categorical("distil.alpha", [0., 0.25, 0.5, 0.75, 1.])
-    # from (cfg.optuna_config)
+    # cfg.distil.alpha = <saggested value from trial>
+    # from (cfg.optuna_config):
     # distil = dict(
-    #               alpha=("suggest_categorical", [0., 0.25, 0.5, 0.75, 1.]),
+    #               alpha=("BaseSuggest([0., 0.25, 0.5, 0.75, 1.])),
     # )
     optuna_config = copy.deepcopy(optuna_config)
 
@@ -63,7 +66,11 @@ def update_config_with_optuna(trial, cfg: Config, optuna_config: Config):
             if isinstance(value, dict):
                 dig(value, prefix=".".join([prefix, key]))
             elif isinstance(value, BaseSuggest):
+                # replace value with suggested value from trial
                 nested_config[key] = value.override(trial, key=".".join([prefix, key]))
+            elif isclass(value) and issubclass(value, BaseSuggest):
+                # importted class is forced to place in config. delete them to avoid syntax error when format
+                nested_config[key] = None
 
     # convert optuna_config value
     dig(optuna_config)
@@ -133,14 +140,14 @@ def main(
         _, world_size = get_dist_info()
         cfg.gpu_ids = range(world_size)
 
-    optuna_config = Config.fromfile(optuna_config)
+    optuna_cfg = Config.fromfile(optuna_config)
 
     def objective(_cfg, _optuna_config, _seed):
         def _objective(trial):
             cfg = copy.deepcopy(_cfg)
             cfg = update_config_with_optuna(trial, cfg, _optuna_config)
 
-            cfg.work_dir = osp.join(cfg.work_dir, trial.trial_id)
+            cfg.work_dir = osp.join(cfg.work_dir, str(trial._trial_id))
 
             # create work_dir
             mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
@@ -202,8 +209,15 @@ def main(
             # Inject trial-pruner in training loop
             if not cfg.get("custom_hooks"):
                 cfg["custom_hooks"] = []
+
+            optuna_hook_cfg = cfg.get("optuna_config", {})
             cfg["custom_hooks"].append(
-                dict(type="OptunaTrialHook", trial=trial, priority="VERY_LOW")
+                dict(
+                    type="OptunaTrialHook",
+                    trial=trial,
+                    priority="VERY_LOW",
+                    **optuna_hook_cfg,
+                )
             )
 
             # add an attribute for visualization convenience
@@ -217,14 +231,24 @@ def main(
                 device=device.value,
                 meta=meta,
             )
-            # must get acc from runner
-            return 0
+            # get validation score from trial, which injected the latest score in OptunaHook
+            return trial.user_attrs.get("last", 0)
 
-    study = optuna.create_study(direction="maximize")
-    study.optimize(objective(cfg, optuna_config, seed), n_trials=100)
-    import pdb
+        return _objective
 
-    pdb.set_trace()
+    timestamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+    log_file = osp.join(cfg.work_dir, f"{timestamp}.log")
+    logger = get_logger("kds", log_file=log_file, log_level=cfg.log_level)
+
+    logger.info("Training with Optuna")
+    logger.info("Config for Optuna:\n%s", optuna_cfg.text)
+
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective(cfg, optuna_cfg, seed), n_trials=5)
+
+    logger.info("Trials:\n%s", "\n".join(map(str, study.trials)))
+    logger.info("Best trial: %s", study.best_trial)
+    logger.info("Best parameters: %s", study.best_params)
 
 
 if __name__ == "__main__":
