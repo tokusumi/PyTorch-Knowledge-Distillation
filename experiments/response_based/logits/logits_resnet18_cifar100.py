@@ -18,6 +18,8 @@ data = dict(
 optimizer = dict(type="SGD", lr=0.1, momentum=0.9, weight_decay=0.0005)
 lr_config = dict(policy="step", step=[60, 120, 160], gamma=0.2)
 log_config = dict(interval=100)
+checkpoint_config = dict(interval=1, max_keep_ckpts=2)
+evaluation = dict(save_best="auto")
 
 distil = dict(
     type="ResponseBased",

@@ -14,6 +14,8 @@ data = dict(
 )
 
 log_config = dict(interval=100)
+checkpoint_config = dict(interval=1, max_keep_ckpts=2)
+evaluation = dict(save_best="auto")
 
 distil = dict(
     type="ResponseBased",

@@ -53,6 +53,8 @@ optimizer_config = dict(grad_clip=None)
 lr_config = dict(policy="step", step=[15])
 runner = dict(type="EpochBasedRunner", max_epochs=200)
 log_config = dict(interval=100)
+checkpoint_config = dict(interval=1, max_keep_ckpts=2)
+evaluation = dict(save_best="auto")
 
 distil = dict(
     type="ResponseBased",
