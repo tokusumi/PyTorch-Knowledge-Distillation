@@ -78,6 +78,21 @@ def update_config_with_optuna(trial, cfg: Config, optuna_config: Config):
     return cfg
 
 
+def load_optuna_config(optuna_config):
+    kwargs = {}
+    sampler_cfg = optuna_config.get("sampler")
+    if sampler_cfg:
+        sampler_class = sampler_cfg.pop("type")
+        kwargs["sampler"] = eval(f"optuna.samplers.{sampler_class}(**sampler_cfg)")
+    pruner_cfg = optuna_config.get("pruner")
+    if pruner_cfg:
+        pruner_class = pruner_cfg.pop("type")
+        kwargs["pruner"] = eval(f"optuna.pruners.{pruner_class}(**pruner_cfg)")
+    if optuna_config.get("direction"):
+        kwargs["direction"] = optuna_config.direction
+    return kwargs
+
+
 def main(
     config: Path = t_config,
     optuna_config: Path = typer.Argument(
@@ -125,6 +140,9 @@ def main(
         cfg.work_dir = osp.join(
             "./work_dirs", osp.splitext(config.absolute().parent.name)[0]
         )
+    # create work_dir
+    mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
+
     cfg.gpu_ids = [gpu_id]
 
     if ipu_replicas is not None:
@@ -243,8 +261,15 @@ def main(
     logger.info("Training with Optuna")
     logger.info("Config for Optuna:\n%s", optuna_cfg.text)
 
-    study = optuna.create_study(direction="minimize")
-    study.optimize(objective(cfg, optuna_cfg, seed), n_trials=5)
+    study = optuna.create_study(
+        **load_optuna_config(optuna_cfg.optuna_config),
+    )
+    logger.info("Optuna sampler is %s", study.sampler.__class__.__name__)
+
+    study.optimize(
+        objective(cfg, optuna_cfg, seed),
+        n_trials=optuna_cfg.optuna_config.get("n_trials", 20),
+    )
 
     logger.info("Trials:\n%s", "\n".join(map(str, study.trials)))
     logger.info("Best trial: %s", study.best_trial)

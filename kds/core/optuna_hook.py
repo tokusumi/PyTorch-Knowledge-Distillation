@@ -9,7 +9,6 @@ from optuna.trial import Trial
 @HOOKS.register_module()
 class OptunaTrialHook(Hook):
     def __init__(self, trial, optimized="accuracy_top-1", *args, **kwargs):
-        super().__init__(*args, **kwargs)
         self.trial = trial
         self.optimized = optimized
 
@@ -37,7 +36,6 @@ class OptunaTrialHook(Hook):
                     break
         if acc is None:
             return
-
         self.trial.report(acc, epoch)
         self.trial.set_user_attr("last", float(acc))
         if self.trial.should_prune():
